@@ -668,4 +668,27 @@ async function bootstrap() {
   urlEl.focus();
 }
 
-bootstrap();
+async function waitForWailsBridge(timeoutMs = 5000) {
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    if (window?.go?.main?.App) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error('Wails bridge did not initialize in time');
+}
+
+async function startApp() {
+  try {
+    await waitForWailsBridge();
+    await bootstrap();
+  } catch (error) {
+    responseMetaEl.textContent = `Startup failed: ${error?.message || String(error)}`;
+  }
+}
+
+startApp();
