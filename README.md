@@ -5,6 +5,7 @@ Simple desktop API client for macOS, built with [Wails](https://github.com/wails
 ## Features
 
 - HTTP methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`
+- Local workspace persistence (`collections`, `folders`, `requests`)
 - Custom request headers (add/remove rows)
 - Raw request body editor
 - Response status and duration

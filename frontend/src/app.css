@@ -1,11 +1,12 @@
 .layout {
   display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
+  grid-template-columns: 320px 1fr 0.95fr;
   gap: 1rem;
   height: 100%;
   padding: 1rem;
 }
 
+.sidebar-panel,
 .request-panel,
 .response-panel {
   background: rgba(13, 23, 39, 0.88);
@@ -18,7 +19,7 @@
 
 h1 {
   margin: 0;
-  font-size: 1.45rem;
+  font-size: 1.35rem;
   letter-spacing: 0.02em;
 }
 
@@ -29,9 +30,91 @@ h2 {
 }
 
 .subtitle {
-  margin: 0.45rem 0 1rem;
-  font-size: 0.9rem;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.87rem;
   color: #a7b8d2;
+}
+
+.sidebar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.workspace-tree {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.workspace-empty {
+  color: #92a4bf;
+  font-size: 0.9rem;
+}
+
+.tree-block {
+  border: 1px solid #2a4066;
+  border-radius: 12px;
+  padding: 0.6rem;
+  background: #0d1c33;
+}
+
+.tree-head,
+.folder-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tree-head {
+  margin-bottom: 0.55rem;
+}
+
+.tree-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #d6e4fb;
+}
+
+.tree-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.folder-block {
+  margin-top: 0.55rem;
+  border-top: 1px solid #1c3151;
+  padding-top: 0.55rem;
+}
+
+.folder-head {
+  color: #9eb6d8;
+  font-size: 0.83rem;
+  margin-bottom: 0.35rem;
+}
+
+.tree-request {
+  width: 100%;
+  border: 1px solid #253a5a;
+  background: #111f36;
+  color: #d9e7ff;
+  border-radius: 9px;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+
+.tree-request.indented {
+  margin-left: 0.8rem;
+  width: calc(100% - 0.8rem);
+}
+
+.tree-request.active {
+  border-color: #5e90d8;
+  background: #1a365e;
 }
 
 .request-line,
@@ -111,6 +194,11 @@ h2 {
   color: #d8e5fb;
 }
 
+.ghost.tiny {
+  font-size: 0.75rem;
+  padding: 0.33rem 0.45rem;
+}
+
 .remove {
   background: #5e2d38;
   color: #ffd9df;
@@ -151,6 +239,16 @@ h2 {
   min-height: 300px;
 }
 
+@media (max-width: 1200px) {
+  .layout {
+    grid-template-columns: 300px 1fr;
+  }
+
+  .response-panel {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;
@@ -158,5 +256,10 @@ h2 {
 
   .request-line {
     grid-template-columns: 1fr;
+  }
+
+  .tree-request.indented {
+    margin-left: 0;
+    width: 100%;
   }
 }
