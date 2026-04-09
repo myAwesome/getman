@@ -199,6 +199,11 @@ h2 {
   padding: 0.33rem 0.45rem;
 }
 
+.remove.tiny {
+  font-size: 0.75rem;
+  padding: 0.33rem 0.45rem;
+}
+
 .remove {
   background: #5e2d38;
   color: #ffd9df;
