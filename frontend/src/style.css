@@ -1,0 +1,28 @@
+:root {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #e8edf5;
+  background: #0e141f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: radial-gradient(circle at 20% 10%, #182338 0, #0e141f 45%, #0a0f18 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
