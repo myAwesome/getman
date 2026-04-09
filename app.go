@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 // App struct
@@ -129,6 +129,10 @@ func (a *App) initStorage() error {
 		return err
 	}
 
+	if err := ensureMySQLDatabaseExists(a.dbDSN); err != nil {
+		return err
+	}
+
 	db, err := sql.Open("mysql", a.dbDSN)
 	if err != nil {
 		return err
@@ -184,6 +188,42 @@ func (a *App) initStorage() error {
 
 	a.db = db
 	return a.migrateLegacyJSONIfNeeded()
+}
+
+func ensureMySQLDatabaseExists(dsn string) error {
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return err
+	}
+
+	dbName := strings.TrimSpace(cfg.DBName)
+	if dbName == "" {
+		return nil
+	}
+
+	adminCfg := *cfg
+	adminCfg.DBName = ""
+
+	adminDB, err := sql.Open("mysql", adminCfg.FormatDSN())
+	if err != nil {
+		return err
+	}
+	defer adminDB.Close()
+
+	if err := adminDB.Ping(); err != nil {
+		return err
+	}
+
+	createDatabaseQuery := fmt.Sprintf(
+		"CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+		quoteMySQLIdentifier(dbName),
+	)
+	_, err = adminDB.Exec(createDatabaseQuery)
+	return err
+}
+
+func quoteMySQLIdentifier(identifier string) string {
+	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
 }
 
 func (a *App) migrateLegacyJSONIfNeeded() error {

@@ -32,7 +32,7 @@ If unset, the app defaults to:
 root:root@tcp(127.0.0.1:3306)/getman?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci
 ```
 
-Ensure the target database (for example `getman`) already exists before starting the app.
+The app will create the target database automatically on startup if it does not exist.
 
 ## Development
 
