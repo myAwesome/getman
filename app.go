@@ -17,14 +17,14 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // App struct
 type App struct {
 	ctx        context.Context
 	dataDir    string
-	dbPath     string
+	dbDSN      string
 	legacyPath string
 	db         *sql.DB
 	mu         sync.Mutex
@@ -116,7 +116,10 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	a.dataDir = filepath.Join(configDir, "getman")
-	a.dbPath = filepath.Join(a.dataDir, "workspace.db")
+	a.dbDSN = strings.TrimSpace(os.Getenv("GETMAN_MYSQL_DSN"))
+	if a.dbDSN == "" {
+		a.dbDSN = "root:root@tcp(127.0.0.1:3306)/getman?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci"
+	}
 	a.legacyPath = filepath.Join(a.dataDir, "workspace.json")
 	a.initErr = a.initStorage()
 }
@@ -126,58 +129,57 @@ func (a *App) initStorage() error {
 		return err
 	}
 
-	db, err := sql.Open("sqlite", a.dbPath)
+	db, err := sql.Open("mysql", a.dbDSN)
 	if err != nil {
 		return err
 	}
 
-	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+	if err := db.Ping(); err != nil {
 		db.Close()
 		return err
 	}
 
-	schema := `
-CREATE TABLE IF NOT EXISTS collections (
-	id TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	position INTEGER NOT NULL,
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
-);
+	schemaStatements := []string{
+		`CREATE TABLE IF NOT EXISTS collections (
+			id VARCHAR(255) PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			position INTEGER NOT NULL,
+			created_at VARCHAR(64) NOT NULL,
+			updated_at VARCHAR(64) NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS folders (
+			id VARCHAR(255) PRIMARY KEY,
+			collection_id VARCHAR(255) NOT NULL,
+			name VARCHAR(255) NOT NULL,
+			position INTEGER NOT NULL,
+			created_at VARCHAR(64) NOT NULL,
+			updated_at VARCHAR(64) NOT NULL,
+			INDEX idx_folders_collection_position (collection_id, position),
+			FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS requests (
+			id VARCHAR(255) PRIMARY KEY,
+			collection_id VARCHAR(255) NOT NULL,
+			folder_id VARCHAR(255),
+			name VARCHAR(255) NOT NULL,
+			method VARCHAR(16) NOT NULL,
+			url TEXT NOT NULL,
+			headers_json TEXT NOT NULL,
+			body TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			created_at VARCHAR(64) NOT NULL,
+			updated_at VARCHAR(64) NOT NULL,
+			INDEX idx_requests_scope_position (collection_id, folder_id, position),
+			FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+			FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+		)`,
+	}
 
-CREATE TABLE IF NOT EXISTS folders (
-	id TEXT PRIMARY KEY,
-	collection_id TEXT NOT NULL,
-	name TEXT NOT NULL,
-	position INTEGER NOT NULL,
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL,
-	FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS requests (
-	id TEXT PRIMARY KEY,
-	collection_id TEXT NOT NULL,
-	folder_id TEXT,
-	name TEXT NOT NULL,
-	method TEXT NOT NULL,
-	url TEXT NOT NULL,
-	headers_json TEXT NOT NULL,
-	body TEXT NOT NULL,
-	position INTEGER NOT NULL,
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL,
-	FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
-	FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_folders_collection_position ON folders(collection_id, position);
-CREATE INDEX IF NOT EXISTS idx_requests_scope_position ON requests(collection_id, folder_id, position);
-`
-
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return err
+	for _, statement := range schemaStatements {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			return err
+		}
 	}
 
 	a.db = db
