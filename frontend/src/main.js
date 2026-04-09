@@ -1,7 +1,19 @@
 import './style.css';
 import './app.css';
 
-import { LoadWorkspace, SaveWorkspace, SendRequest } from '../wailsjs/go/main/App';
+import {
+  LoadWorkspace,
+  SendRequest,
+  CreateCollection,
+  UpdateCollection,
+  DeleteCollection,
+  CreateFolder,
+  UpdateFolder,
+  DeleteFolder,
+  CreateRequest,
+  UpdateRequest,
+  DeleteRequest,
+} from '../wailsjs/go/main/App';
 
 document.querySelector('#app').innerHTML = `
   <main class="layout">
@@ -72,40 +84,8 @@ const workspaceTreeEl = document.getElementById('workspace-tree');
 let workspace = { collections: [], updatedAt: '' };
 let selectedRequestId = '';
 let headersDraft = [];
-let saveTimer = null;
-let bootstrapping = true;
-
-function uid(prefix) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createDefaultRequest(name = 'New Request') {
-  return {
-    id: uid('req'),
-    name,
-    method: 'GET',
-    url: '',
-    headers: [{ key: 'Content-Type', value: 'application/json' }],
-    body: '',
-  };
-}
-
-function createDefaultFolder(name = 'New Folder') {
-  return {
-    id: uid('fld'),
-    name,
-    requests: [],
-  };
-}
-
-function createDefaultCollection(name = 'New Collection') {
-  return {
-    id: uid('col'),
-    name,
-    requests: [createDefaultRequest('New Request')],
-    folders: [],
-  };
-}
+let syncingSelection = false;
+let requestSaveTimer = null;
 
 function normalizeWorkspace(input) {
   const normalized = {
@@ -114,14 +94,14 @@ function normalizeWorkspace(input) {
   };
 
   normalized.collections = normalized.collections.map((collection) => ({
-    id: collection.id || uid('col'),
+    id: collection.id || '',
     name: collection.name || 'Collection',
     requests: Array.isArray(collection.requests)
       ? collection.requests.map((request) => normalizeRequest(request))
       : [],
     folders: Array.isArray(collection.folders)
       ? collection.folders.map((folder) => ({
-          id: folder.id || uid('fld'),
+          id: folder.id || '',
           name: folder.name || 'Folder',
           requests: Array.isArray(folder.requests)
             ? folder.requests.map((request) => normalizeRequest(request))
@@ -135,31 +115,13 @@ function normalizeWorkspace(input) {
 
 function normalizeRequest(request) {
   return {
-    id: request.id || uid('req'),
+    id: request.id || '',
     name: request.name || 'Request',
     method: request.method || 'GET',
     url: request.url || '',
     headers: Array.isArray(request.headers) ? request.headers : [],
     body: request.body || '',
   };
-}
-
-function ensureWorkspaceSeed() {
-  if (workspace.collections.length === 0) {
-    const collection = createDefaultCollection('Default Collection');
-    workspace.collections.push(collection);
-    selectedRequestId = collection.requests[0].id;
-    scheduleSave();
-    return;
-  }
-
-  const selected = findRequestById(selectedRequestId);
-  if (selected) {
-    return;
-  }
-
-  const firstRequest = findFirstRequest();
-  selectedRequestId = firstRequest ? firstRequest.id : '';
 }
 
 function findFirstRequest() {
@@ -198,6 +160,47 @@ function findRequestById(requestId) {
   }
 
   return null;
+}
+
+function findRequestLocation(requestId) {
+  if (!requestId) {
+    return null;
+  }
+
+  for (const collection of workspace.collections) {
+    const fromCollection = collection.requests.find((request) => request.id === requestId);
+    if (fromCollection) {
+      return { request: fromCollection, collection, folder: null };
+    }
+
+    for (const folder of collection.folders) {
+      const fromFolder = folder.requests.find((request) => request.id === requestId);
+      if (fromFolder) {
+        return { request: fromFolder, collection, folder };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function reloadWorkspace(preferredRequestId = '') {
+  const loaded = await LoadWorkspace();
+  workspace = normalizeWorkspace(loaded);
+
+  const preferred = findRequestById(preferredRequestId);
+  const current = findRequestById(selectedRequestId);
+  if (preferred) {
+    selectedRequestId = preferred.id;
+  } else if (current) {
+    selectedRequestId = current.id;
+  } else {
+    const first = findFirstRequest();
+    selectedRequestId = first ? first.id : '';
+  }
+
+  renderTree();
+  syncEditorFromSelectedRequest();
 }
 
 function setPending(isPending) {
@@ -294,29 +297,65 @@ function renderTree() {
     const actions = document.createElement('div');
     actions.className = 'tree-actions';
 
+    const renameCollectionBtn = document.createElement('button');
+    renameCollectionBtn.className = 'ghost tiny';
+    renameCollectionBtn.textContent = 'Rename';
+    renameCollectionBtn.addEventListener('click', async () => {
+      const value = window.prompt('Collection name', collection.name);
+      if (value === null) {
+        return;
+      }
+      await mutate(async () => {
+        await UpdateCollection(collection.id, value.trim());
+        await reloadWorkspace(selectedRequestId);
+      });
+    });
+
     const addRequestBtn = document.createElement('button');
     addRequestBtn.className = 'ghost tiny';
     addRequestBtn.textContent = '+ Request';
-    addRequestBtn.addEventListener('click', () => {
-      const request = createDefaultRequest('Collection Request');
-      collection.requests.push(request);
-      selectedRequestId = request.id;
-      renderTree();
-      syncEditorFromSelectedRequest();
-      scheduleSave();
+    addRequestBtn.addEventListener('click', async () => {
+      await mutate(async () => {
+        const request = await CreateRequest({
+          collectionId: collection.id,
+          folderId: '',
+          name: 'Collection Request',
+          method: 'GET',
+          url: '',
+          headers: [{ key: 'Content-Type', value: 'application/json' }],
+          body: '',
+        });
+        await reloadWorkspace(request.id);
+      });
     });
 
     const addFolderBtn = document.createElement('button');
     addFolderBtn.className = 'ghost tiny';
     addFolderBtn.textContent = '+ Folder';
-    addFolderBtn.addEventListener('click', () => {
-      collection.folders.push(createDefaultFolder('New Folder'));
-      renderTree();
-      scheduleSave();
+    addFolderBtn.addEventListener('click', async () => {
+      await mutate(async () => {
+        await CreateFolder(collection.id, 'New Folder');
+        await reloadWorkspace(selectedRequestId);
+      });
     });
 
+    const deleteCollectionBtn = document.createElement('button');
+    deleteCollectionBtn.className = 'remove tiny';
+    deleteCollectionBtn.textContent = 'Delete';
+    deleteCollectionBtn.addEventListener('click', async () => {
+      if (!window.confirm(`Delete collection "${collection.name}"?`)) {
+        return;
+      }
+      await mutate(async () => {
+        await DeleteCollection(collection.id);
+        await reloadWorkspace('');
+      });
+    });
+
+    actions.appendChild(renameCollectionBtn);
     actions.appendChild(addRequestBtn);
     actions.appendChild(addFolderBtn);
+    actions.appendChild(deleteCollectionBtn);
     head.appendChild(title);
     head.appendChild(actions);
     block.appendChild(head);
@@ -331,21 +370,63 @@ function renderTree() {
 
       const folderHead = document.createElement('div');
       folderHead.className = 'folder-head';
-      folderHead.textContent = folder.name;
+
+      const folderTitle = document.createElement('span');
+      folderTitle.textContent = folder.name;
+
+      const folderActions = document.createElement('div');
+      folderActions.className = 'tree-actions';
+
+      const renameFolderBtn = document.createElement('button');
+      renameFolderBtn.className = 'ghost tiny';
+      renameFolderBtn.textContent = 'Rename';
+      renameFolderBtn.addEventListener('click', async () => {
+        const value = window.prompt('Folder name', folder.name);
+        if (value === null) {
+          return;
+        }
+        await mutate(async () => {
+          await UpdateFolder(folder.id, value.trim());
+          await reloadWorkspace(selectedRequestId);
+        });
+      });
 
       const folderAddRequest = document.createElement('button');
       folderAddRequest.className = 'ghost tiny';
       folderAddRequest.textContent = '+ Request';
-      folderAddRequest.addEventListener('click', () => {
-        const request = createDefaultRequest(`${folder.name} Request`);
-        folder.requests.push(request);
-        selectedRequestId = request.id;
-        renderTree();
-        syncEditorFromSelectedRequest();
-        scheduleSave();
+      folderAddRequest.addEventListener('click', async () => {
+        await mutate(async () => {
+          const request = await CreateRequest({
+            collectionId: collection.id,
+            folderId: folder.id,
+            name: `${folder.name} Request`,
+            method: 'GET',
+            url: '',
+            headers: [{ key: 'Content-Type', value: 'application/json' }],
+            body: '',
+          });
+          await reloadWorkspace(request.id);
+        });
       });
 
-      folderHead.appendChild(folderAddRequest);
+      const deleteFolderBtn = document.createElement('button');
+      deleteFolderBtn.className = 'remove tiny';
+      deleteFolderBtn.textContent = 'Delete';
+      deleteFolderBtn.addEventListener('click', async () => {
+        if (!window.confirm(`Delete folder "${folder.name}" and all contained requests?`)) {
+          return;
+        }
+        await mutate(async () => {
+          await DeleteFolder(folder.id);
+          await reloadWorkspace(selectedRequestId);
+        });
+      });
+
+      folderActions.appendChild(renameFolderBtn);
+      folderActions.appendChild(folderAddRequest);
+      folderActions.appendChild(deleteFolderBtn);
+      folderHead.appendChild(folderTitle);
+      folderHead.appendChild(folderActions);
       folderBlock.appendChild(folderHead);
 
       folder.requests.forEach((request) => {
@@ -360,6 +441,9 @@ function renderTree() {
 }
 
 function buildRequestTreeItem(request, indentLevel) {
+  const row = document.createElement('div');
+  row.className = 'tree-head';
+
   const button = document.createElement('button');
   button.className = 'tree-request';
   if (request.id === selectedRequestId) {
@@ -376,10 +460,28 @@ function buildRequestTreeItem(request, indentLevel) {
     syncEditorFromSelectedRequest();
   });
 
-  return button;
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'remove tiny';
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.addEventListener('click', async () => {
+    if (!window.confirm(`Delete request "${request.name}"?`)) {
+      return;
+    }
+
+    await mutate(async () => {
+      await DeleteRequest(request.id);
+      await reloadWorkspace('');
+    });
+  });
+
+  row.appendChild(button);
+  row.appendChild(deleteBtn);
+  return row;
 }
 
 function syncEditorFromSelectedRequest() {
+  syncingSelection = true;
+
   const selected = findRequestById(selectedRequestId);
   if (!selected) {
     requestNameEl.value = '';
@@ -388,6 +490,7 @@ function syncEditorFromSelectedRequest() {
     bodyEl.value = '';
     headersDraft = [];
     renderHeaders();
+    syncingSelection = false;
     return;
   }
 
@@ -400,45 +503,66 @@ function syncEditorFromSelectedRequest() {
     : [];
 
   renderHeaders();
+  syncingSelection = false;
 }
 
 function updateSelectedRequestFromEditor() {
-  const selected = findRequestById(selectedRequestId);
-  if (!selected) {
+  if (syncingSelection) {
     return;
   }
 
-  selected.name = requestNameEl.value.trim() || 'Untitled Request';
-  selected.method = methodEl.value;
-  selected.url = urlEl.value.trim();
-  selected.body = bodyEl.value;
-  selected.headers = headersDraft
+  const location = findRequestLocation(selectedRequestId);
+  if (!location) {
+    return;
+  }
+
+  location.request.name = requestNameEl.value.trim() || 'Untitled Request';
+  location.request.method = methodEl.value;
+  location.request.url = urlEl.value.trim();
+  location.request.body = bodyEl.value;
+  location.request.headers = headersDraft
     .map((header) => ({ key: header.key.trim(), value: header.value }))
     .filter((header) => header.key.length > 0);
 
   renderTree();
-  scheduleSave();
+  scheduleRequestSave();
 }
 
-function scheduleSave() {
-  if (bootstrapping) {
-    return;
+function scheduleRequestSave() {
+  if (requestSaveTimer) {
+    clearTimeout(requestSaveTimer);
   }
 
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-  }
-
-  saveTimer = setTimeout(() => {
-    persistWorkspace();
+  requestSaveTimer = setTimeout(() => {
+    persistSelectedRequest();
   }, 250);
 }
 
-async function persistWorkspace() {
+async function persistSelectedRequest() {
+  const location = findRequestLocation(selectedRequestId);
+  if (!location) {
+    return;
+  }
+
+  await mutate(async () => {
+    await UpdateRequest({
+      id: location.request.id,
+      collectionId: location.collection.id,
+      folderId: location.folder ? location.folder.id : '',
+      name: location.request.name,
+      method: location.request.method,
+      url: location.request.url,
+      headers: location.request.headers,
+      body: location.request.body,
+    });
+  });
+}
+
+async function mutate(fn) {
   try {
-    await SaveWorkspace(workspace);
+    await fn();
   } catch (error) {
-    responseMetaEl.textContent = `Save failed: ${error?.message || String(error)}`;
+    responseMetaEl.textContent = `Persistence failed: ${error?.message || String(error)}`;
   }
 }
 
@@ -483,13 +607,20 @@ async function sendRequest() {
   }
 }
 
-addCollectionEl.addEventListener('click', () => {
-  const collection = createDefaultCollection(`Collection ${workspace.collections.length + 1}`);
-  workspace.collections.push(collection);
-  selectedRequestId = collection.requests[0].id;
-  renderTree();
-  syncEditorFromSelectedRequest();
-  scheduleSave();
+addCollectionEl.addEventListener('click', async () => {
+  await mutate(async () => {
+    const collection = await CreateCollection(`Collection ${workspace.collections.length + 1}`);
+    const request = await CreateRequest({
+      collectionId: collection.id,
+      folderId: '',
+      name: 'New Request',
+      method: 'GET',
+      url: '',
+      headers: [{ key: 'Content-Type', value: 'application/json' }],
+      body: '',
+    });
+    await reloadWorkspace(request.id);
+  });
 });
 
 addHeaderEl.addEventListener('click', () => {
@@ -512,20 +643,29 @@ bodyEl.addEventListener('input', updateSelectedRequestFromEditor);
 
 async function bootstrap() {
   try {
-    const loaded = await LoadWorkspace();
-    workspace = normalizeWorkspace(loaded);
+    await reloadWorkspace();
+
+    if (workspace.collections.length === 0) {
+      const collection = await CreateCollection('Default Collection');
+      const request = await CreateRequest({
+        collectionId: collection.id,
+        folderId: '',
+        name: 'New Request',
+        method: 'GET',
+        url: '',
+        headers: [{ key: 'Content-Type', value: 'application/json' }],
+        body: '',
+      });
+      await reloadWorkspace(request.id);
+    }
   } catch (error) {
     workspace = { collections: [], updatedAt: '' };
     responseMetaEl.textContent = `Load failed: ${error?.message || String(error)}`;
+    renderTree();
+    syncEditorFromSelectedRequest();
   }
 
-  ensureWorkspaceSeed();
-  renderTree();
-  syncEditorFromSelectedRequest();
   urlEl.focus();
-
-  bootstrapping = false;
-  scheduleSave();
 }
 
 bootstrap();
